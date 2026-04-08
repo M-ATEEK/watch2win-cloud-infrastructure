@@ -1,0 +1,203 @@
+services:
+  traefik:
+    image: traefik:v3.6.10
+    command:
+      - "--configFile=/app/configs/traefik.toml"
+    volumes:
+      - ./traefik/traefik.toml:/app/configs/traefik.toml:ro
+      - ./traefik/dynamic_conf.toml:/app/configs/dynamic_conf.toml:ro
+      - ./traefik/certs:/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.service=api@internal"
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - cloud_project
+
+  mongo:
+    image: mongo:6.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: watch2win
+    volumes:
+      - ./database:/docker-entrypoint-initdb.d:ro
+      - ./db_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    ports:
+      - "27017:27017"
+    networks:
+      - cloud_project
+
+  auth:
+    image: watch2win-backend:dev
+    restart: unless-stopped
+    volumes:
+      - ./watch2win-auth-service:/workspace/auth
+    working_dir: /workspace/auth
+    environment:
+      NODE_ENV: development
+      NODE_PATH: /usr/src/app/node_modules
+      PORT: 3001
+      JWT_SECRET: inventally
+      MONGOOSE_URI_STRING: mongodb://mongo:27017/watch2win
+      BACKEND_API_URL: http://backend:8000/api/v1
+    command: node index.js
+    depends_on:
+      mongo:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    networks:
+      - cloud_project
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth.rule=Host(`auth.localhost`)"
+      - "traefik.http.routers.auth.entrypoints=websecure"
+      - "traefik.http.routers.auth.tls=true"
+      - "traefik.http.services.auth.loadbalancer.server.port=3001"
+
+  processor:
+    build:
+      context: ./watch2win-processor-service
+      dockerfile: Dockerfile
+    image: watch2win-processor-service:dev
+    restart: unless-stopped
+    environment:
+      APP_NAME: Watch2Win Search Processor
+      MONGODB_URI: mongodb://mongo:27017
+      MONGO_DATABASE: watch2win
+      JWT_SECRET: inventally
+      CORS_ORIGINS: '["https://user.localhost","https://admin.localhost","https://backend.localhost","https://traefik.localhost"]'
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - cloud_project
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.processor.rule=Host(`processor.localhost`)"
+      - "traefik.http.routers.processor.entrypoints=websecure"
+      - "traefik.http.routers.processor.tls=true"
+      - "traefik.http.services.processor.loadbalancer.server.port=8000"
+
+  backend:
+    build:
+      context: ./watch2win-backend
+      dockerfile: Dockerfile
+    image: watch2win-backend:dev
+    restart: unless-stopped
+    volumes:
+      - ./watch2win-backend:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      NODE_ENV: development
+      PORT: 8000
+      SITE_URL: 0.0.0.0
+      APP_URL: https://user.localhost
+      API_URL: https://backend.localhost
+      ALLOW_ORIGINS: https://user.localhost,https://admin.localhost,https://traefik.localhost
+      MONGOOSE_URI_STRING: mongodb://mongo:27017/watch2win
+      JWT_SECRET: inventally
+    command: npm run dev
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - cloud_project
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`backend.localhost`)"
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      - "traefik.http.routers.backend.tls=true"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+
+  user-panel:
+    build:
+      context: ./watch2win-user-panel
+      dockerfile: Dockerfile
+    image: watch2win-user-panel:dev
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./watch2win-user-panel:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+      CHOKIDAR_USEPOLLING: "true"
+      DANGEROUSLY_DISABLE_HOST_CHECK: "true"
+      WDS_SOCKET_PORT: "443"
+      WDS_SOCKET_HOST: user.localhost
+      REACT_APP_API_URL: https://backend.localhost/api/v1
+      REACT_APP_IMG_URL: https://backend.localhost
+      REACT_APP_AUTH_URL: https://auth.localhost
+      REACT_APP_PROCESSOR_URL: https://processor.localhost:8001
+    command: npm start
+    depends_on:
+      backend:
+        condition: service_started
+      auth:
+        condition: service_started
+      processor:
+        condition: service_started
+    networks:
+      - cloud_project
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.user-panel.rule=Host(`user.localhost`)"
+      - "traefik.http.routers.user-panel.entrypoints=websecure"
+      - "traefik.http.routers.user-panel.tls=true"
+      - "traefik.http.services.user-panel.loadbalancer.server.port=3000"
+
+  admin-panel:
+    build:
+      context: ./watch2win-admin-panel
+      dockerfile: Dockerfile
+    image: watch2win-admin-panel:dev
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    volumes:
+      - ./watch2win-admin-panel:/usr/src/app
+      - /usr/src/app/node_modules
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3001
+      CHOKIDAR_USEPOLLING: "true"
+      DANGEROUSLY_DISABLE_HOST_CHECK: "true"
+      WDS_SOCKET_PORT: "443"
+      WDS_SOCKET_HOST: admin.localhost
+      REACT_APP_API_URL: https://backend.localhost/api/v1
+      REACT_APP_IMG_URL: https://backend.localhost
+      REACT_APP_AUTH_URL: https://auth.localhost
+    command: npm start
+    depends_on:
+      backend:
+        condition: service_started
+      auth:
+        condition: service_started
+    networks:
+      - cloud_project
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.admin-panel.rule=Host(`admin.localhost`)"
+      - "traefik.http.routers.admin-panel.entrypoints=websecure"
+      - "traefik.http.routers.admin-panel.tls=true"
+      - "traefik.http.services.admin-panel.loadbalancer.server.port=3001"
+
+networks:
+  cloud_project:
+    name: cloud_project
+    driver: bridge
