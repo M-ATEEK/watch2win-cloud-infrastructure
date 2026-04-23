@@ -3,6 +3,9 @@ services:
     image: traefik:v3.6.10
     command:
       - "--configFile=/app/configs/traefik.toml"
+      - "--metrics.prometheus=true"
+      - "--metrics.prometheus.addEntryPointsLabels=true"
+      - "--metrics.prometheus.addserviceslabels=true"
     volumes:
       - ./traefik/traefik.toml:/app/configs/traefik.toml:ro
       - ./traefik/dynamic_conf.toml:/app/configs/dynamic_conf.toml:ro
@@ -197,7 +200,65 @@ services:
       - "traefik.http.routers.admin-panel.tls=true"
       - "traefik.http.services.admin-panel.loadbalancer.server.port=3001"
 
+
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+    restart: unless-stopped
+    networks:
+      - cloud_project
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    volumes:
+      - ./monitoring/loki-config.yaml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+    networks:
+      - cloud_project
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./monitoring/promtail-config.yaml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    restart: unless-stopped
+    networks:
+      - cloud_project
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.localhost`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure" 
+      - "traefik.http.routers.grafana.tls=true"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    restart: unless-stopped
+    networks:
+      - cloud_project
+
 networks:
   cloud_project:
     name: cloud_project
     driver: bridge
+
+volumes:
+  grafana_data: 

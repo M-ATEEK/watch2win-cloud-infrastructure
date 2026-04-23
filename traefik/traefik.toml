@@ -23,3 +23,8 @@
 
 [log]
   level = "INFO"
+  
+[metrics]
+  [metrics.prometheus]
+    addEntryPointsLabels = true
+    addServicesLabels = true
