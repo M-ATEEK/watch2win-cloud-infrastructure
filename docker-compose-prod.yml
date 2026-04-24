@@ -1,0 +1,213 @@
+services:
+  traefik:
+    image: traefik:v3.6.10
+    command:
+      - "--configFile=/app/configs/traefik.toml"
+      - "--metrics.prometheus=true"
+      - "--metrics.prometheus.addEntryPointsLabels=true"
+      - "--metrics.prometheus.addserviceslabels=true"
+    volumes:
+      - ./traefik/traefik.toml:/app/configs/traefik.toml:ro
+      - ./traefik/dynamic_conf.toml:/app/configs/dynamic_conf.toml:ro
+      - ./traefik/certs:/certs:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.traefik.rule=Host(`traefik.localhost`)"
+      - "traefik.http.routers.traefik.entrypoints=websecure"
+      - "traefik.http.routers.traefik.tls=true"
+      - "traefik.http.routers.traefik.service=api@internal"
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - cloud_project
+
+  mongo:
+    image: mongo:6.0
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: watch2win
+    volumes:
+      - ./database:/docker-entrypoint-initdb.d:ro
+      - ./db_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    ports:
+      - "27017:27017"
+    networks:
+      - cloud_project
+
+  auth:
+    image: watch2win-auth-service:prod
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      JWT_SECRET: inventally
+      MONGOOSE_URI_STRING: mongodb://mongo:27017/watch2win
+      BACKEND_API_URL: http://backend:8000/api/v1
+    depends_on:
+      mongo:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    networks:
+      - cloud_project
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.auth.rule=Host(`auth.localhost`)"
+      - "traefik.http.routers.auth.entrypoints=websecure"
+      - "traefik.http.routers.auth.tls=true"
+      - "traefik.http.services.auth.loadbalancer.server.port=3001"
+
+  backend:
+    image: watch2win-backend:prod
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 8000
+      SITE_URL: 0.0.0.0
+      APP_URL: https://user.localhost
+      API_URL: https://backend.localhost
+      ALLOW_ORIGINS: https://user.localhost,https://admin.localhost,https://traefik.localhost,https://auth.localhost,https://processor.localhost
+      MONGOOSE_URI_STRING: mongodb://mongo:27017/watch2win
+      JWT_SECRET: inventally
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - cloud_project
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`backend.localhost`)"
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      - "traefik.http.routers.backend.tls=true"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+
+  processor:
+    image: watch2win-processor-service:prod
+    restart: unless-stopped
+    environment:
+      APP_NAME: Watch2Win Search Processor
+      MONGODB_URI: mongodb://mongo:27017
+      MONGO_DATABASE: watch2win
+      JWT_SECRET: inventally
+      CORS_ORIGINS: '["https://user.localhost","https://admin.localhost","https://backend.localhost","https://traefik.localhost"]'
+    depends_on:
+      mongo:
+        condition: service_healthy
+    networks:
+      - cloud_project
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.processor.rule=Host(`processor.localhost`)"
+      - "traefik.http.routers.processor.entrypoints=websecure"
+      - "traefik.http.routers.processor.tls=true"
+      - "traefik.http.services.processor.loadbalancer.server.port=8000"
+
+  user-panel:
+    image: watch2win-user-panel:prod
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+      auth:
+        condition: service_started
+      processor:
+        condition: service_started
+    environment:
+      SERVER_UI_NAME: user.localhost
+    networks:
+      - cloud_project
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.user-panel.rule=Host(`user.localhost`)"
+      - "traefik.http.routers.user-panel.entrypoints=websecure"
+      - "traefik.http.routers.user-panel.tls=true"
+      - "traefik.http.services.user-panel.loadbalancer.server.port=8904"
+
+  admin-panel:
+    image: watch2win-admin-panel:prod
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_started
+      auth:
+        condition: service_started
+    environment:
+      SERVER_UI_NAME: admin.localhost
+    networks:
+      - cloud_project
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.admin-panel.rule=Host(`admin.localhost`)"
+      - "traefik.http.routers.admin-panel.entrypoints=websecure"
+      - "traefik.http.routers.admin-panel.tls=true"
+      - "traefik.http.services.admin-panel.loadbalancer.server.port=8904"
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+    restart: unless-stopped
+    networks:
+      - cloud_project
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    volumes:
+      - ./monitoring/loki-config.yaml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+    ports:
+      - "3100:3100"
+    restart: unless-stopped
+    networks:
+      - cloud_project
+
+  promtail:
+    image: grafana/promtail:latest
+    container_name: promtail
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./monitoring/promtail-config.yaml:/etc/promtail/config.yml
+    command: -config.file=/etc/promtail/config.yml
+    restart: unless-stopped
+    networks:
+      - cloud_project
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning/datasources/datasources.yml:/etc/grafana/provisioning/datasources/datasources.yml:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.grafana.rule=Host(`grafana.localhost`)"
+      - "traefik.http.routers.grafana.entrypoints=websecure"
+      - "traefik.http.routers.grafana.tls=true"
+      - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+    restart: unless-stopped
+    networks:
+      - cloud_project
+
+networks:
+  cloud_project:
+    name: cloud_project
+    driver: bridge
+
+volumes:
+  grafana_data:

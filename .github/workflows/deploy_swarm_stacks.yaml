@@ -1,0 +1,175 @@
+name: Deploy Swarm Stacks
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "stacks/**"
+      - "monitoring/**"
+      - "deploy/**"
+      - ".github/workflows/deploy_swarm_stacks.yaml"
+  workflow_dispatch:
+    inputs:
+      auth_image_tag:
+        description: "Image tag for auth service"
+        required: false
+        default: "latest"
+      backend_image_tag:
+        description: "Image tag for backend service"
+        required: false
+        default: "latest"
+      processor_image_tag:
+        description: "Image tag for processor service"
+        required: false
+        default: "latest"
+      user_panel_image_tag:
+        description: "Image tag for user panel"
+        required: false
+        default: "latest"
+      admin_panel_image_tag:
+        description: "Image tag for admin panel"
+        required: false
+        default: "latest"
+      deploy_portainer:
+        description: "Deploy Portainer stack"
+        required: false
+        type: boolean
+        default: true
+      deploy_traefik:
+        description: "Deploy Traefik stack"
+        required: false
+        type: boolean
+        default: true
+      deploy_app:
+        description: "Deploy application stack"
+        required: false
+        type: boolean
+        default: true
+      deploy_monitoring:
+        description: "Deploy monitoring stack"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Prepare deployment bundle
+        run: |
+          REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          BASE_DOMAIN="${{ secrets.BASE_DOMAIN }}"
+
+          AUTH_IMAGE_TAG="${{ github.event.inputs.auth_image_tag }}"
+          BACKEND_IMAGE_TAG="${{ github.event.inputs.backend_image_tag }}"
+          PROCESSOR_IMAGE_TAG="${{ github.event.inputs.processor_image_tag }}"
+          USER_PANEL_IMAGE_TAG="${{ github.event.inputs.user_panel_image_tag }}"
+          ADMIN_PANEL_IMAGE_TAG="${{ github.event.inputs.admin_panel_image_tag }}"
+          DEPLOY_PORTAINER="${{ github.event.inputs.deploy_portainer }}"
+          DEPLOY_TRAEFIK="${{ github.event.inputs.deploy_traefik }}"
+          DEPLOY_APP="${{ github.event.inputs.deploy_app }}"
+          DEPLOY_MONITORING="${{ github.event.inputs.deploy_monitoring }}"
+
+          [ -n "$AUTH_IMAGE_TAG" ] || AUTH_IMAGE_TAG="latest"
+          [ -n "$BACKEND_IMAGE_TAG" ] || BACKEND_IMAGE_TAG="latest"
+          [ -n "$PROCESSOR_IMAGE_TAG" ] || PROCESSOR_IMAGE_TAG="latest"
+          [ -n "$USER_PANEL_IMAGE_TAG" ] || USER_PANEL_IMAGE_TAG="latest"
+          [ -n "$ADMIN_PANEL_IMAGE_TAG" ] || ADMIN_PANEL_IMAGE_TAG="latest"
+          [ -n "$DEPLOY_PORTAINER" ] || DEPLOY_PORTAINER="true"
+          [ -n "$DEPLOY_TRAEFIK" ] || DEPLOY_TRAEFIK="true"
+          [ -n "$DEPLOY_APP" ] || DEPLOY_APP="true"
+          [ -n "$DEPLOY_MONITORING" ] || DEPLOY_MONITORING="true"
+
+          mkdir -p deploy/secrets
+
+          cat > deploy/stack.env <<EOF
+          GHCR_OWNER=$REPO_OWNER
+          BASE_DOMAIN=$BASE_DOMAIN
+          ACME_EMAIL=${{ secrets.ACME_EMAIL }}
+          JWT_SECRET=${{ secrets.JWT_SECRET }}
+          MONGO_DATABASE=${{ secrets.MONGO_DATABASE }}
+          AUTH_IMAGE_TAG=$AUTH_IMAGE_TAG
+          BACKEND_IMAGE_TAG=$BACKEND_IMAGE_TAG
+          PROCESSOR_IMAGE_TAG=$PROCESSOR_IMAGE_TAG
+          USER_PANEL_IMAGE_TAG=$USER_PANEL_IMAGE_TAG
+          ADMIN_PANEL_IMAGE_TAG=$ADMIN_PANEL_IMAGE_TAG
+          TRAEFIK_HOST=traefik.$BASE_DOMAIN
+          PORTAINER_HOST=portainer.$BASE_DOMAIN
+          AUTH_HOST=auth.$BASE_DOMAIN
+          BACKEND_HOST=backend.$BASE_DOMAIN
+          PROCESSOR_HOST=processor.$BASE_DOMAIN
+          USER_HOST=user.$BASE_DOMAIN
+          ADMIN_HOST=admin.$BASE_DOMAIN
+          GRAFANA_HOST=grafana.$BASE_DOMAIN
+          PROMETHEUS_HOST=prometheus.$BASE_DOMAIN
+          DEPLOY_PORTAINER=$DEPLOY_PORTAINER
+          DEPLOY_TRAEFIK=$DEPLOY_TRAEFIK
+          DEPLOY_APP=$DEPLOY_APP
+          DEPLOY_MONITORING=$DEPLOY_MONITORING
+          EOF
+
+          printf '%s' "${{ secrets.DO_TOKEN }}" > deploy/secrets/do_token.txt
+          printf '%s' "${{ secrets.TRAEFIK_USERS }}" > deploy/secrets/traefik_users.txt
+          printf '%s' "${{ secrets.PROMETHEUS_USERS }}" > deploy/secrets/prometheus_users.txt
+          printf '%s' "${{ secrets.GRAFANA_ADMIN_PASSWORD }}" > deploy/secrets/grafana_admin_password.txt
+
+      - name: Copy deployment bundle to Swarm manager
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SWARM_HOST }}
+          username: ${{ secrets.SWARM_USER }}
+          key: ${{ secrets.SWARM_SSH_KEY }}
+          port: ${{ secrets.SWARM_PORT }}
+          source: "stacks,monitoring,deploy"
+          target: "~/watch2win-infra"
+
+      - name: Deploy stacks on Swarm manager
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SWARM_HOST }}
+          username: ${{ secrets.SWARM_USER }}
+          key: ${{ secrets.SWARM_SSH_KEY }}
+          port: ${{ secrets.SWARM_PORT }}
+          script: |
+            set -e
+            cd ~/watch2win-infra
+
+            if ! docker info --format '{{.Swarm.LocalNodeState}}' | grep -q active; then
+              echo "Docker Swarm is not initialized on this host."
+              exit 1
+            fi
+
+            set -a
+            . ./deploy/stack.env
+            set +a
+
+            docker login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GHCR_PAT }}"
+
+            docker network inspect agent_network >/dev/null 2>&1 || docker network create --driver overlay --attachable agent_network
+            docker network inspect app_network >/dev/null 2>&1 || docker network create --driver overlay --attachable app_network
+            docker volume inspect portainer_data >/dev/null 2>&1 || docker volume create portainer_data
+            docker volume inspect letsencrypt >/dev/null 2>&1 || docker volume create letsencrypt
+
+            if [ "$DEPLOY_PORTAINER" = "true" ]; then
+              docker stack deploy -c stacks/portainer-stack.yml portainer-stack --with-registry-auth
+            fi
+
+            if [ "$DEPLOY_TRAEFIK" = "true" ]; then
+              docker stack deploy -c stacks/traefik-stack.yml traefik-stack --with-registry-auth
+            fi
+
+            if [ "$DEPLOY_APP" = "true" ]; then
+              docker stack deploy -c stacks/app-stack.yml watch2win --with-registry-auth
+            fi
+
+            if [ "$DEPLOY_MONITORING" = "true" ]; then
+              docker stack deploy -c stacks/monitor-stack.yml monitor-stack --with-registry-auth
+            fi

@@ -1,0 +1,71 @@
+version: "3.8"
+
+services:
+  traefik:
+    image: public.ecr.aws/docker/library/traefik:v2.11.21
+    command:
+      - "--api.insecure=false"
+      - "--api.dashboard=true"
+      - "--providers.docker=true"
+      - "--providers.docker.swarmmode=true"
+      - "--providers.docker.watch=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
+      - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.myresolver.acme.email=${ACME_EMAIL}"
+      - "--certificatesresolvers.myresolver.acme.storage=/letsencrypt/acme.json"
+      - "--certificatesresolvers.myresolver.acme.dnschallenge=true"
+      - "--certificatesresolvers.myresolver.acme.dnschallenge.provider=digitalocean"
+      - "--certificatesresolvers.myresolver.acme.dnschallenge.delaybeforecheck=0"
+      - "--metrics.prometheus=true"
+      - "--metrics.prometheus.buckets=0.1,0.3,1.2,5.0"
+      - "--metrics.prometheus.addentrypointslabels=true"
+      - "--metrics.prometheus.addserviceslabels=true"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - letsencrypt:/letsencrypt
+    environment:
+      - DO_TOKEN_FILE=/run/secrets/do_token
+    secrets:
+      - do_token
+      - traefik_users
+      - prometheus_users
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - app_network
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=app_network"
+        - "traefik.http.routers.traefik.rule=Host(`${TRAEFIK_HOST}`)"
+        - "traefik.http.routers.traefik.entrypoints=websecure"
+        - "traefik.http.routers.traefik.tls.certresolver=myresolver"
+        - "traefik.http.routers.traefik.service=api@internal"
+        - "traefik.http.routers.traefik.middlewares=traefik-auth"
+        - "traefik.http.middlewares.traefik-auth.basicauth.usersfile=/run/secrets/traefik_users"
+
+secrets:
+  do_token:
+    file: ../deploy/secrets/do_token.txt
+  traefik_users:
+    file: ../deploy/secrets/traefik_users.txt
+  prometheus_users:
+    file: ../deploy/secrets/prometheus_users.txt
+
+volumes:
+  letsencrypt:
+    external: true
+
+networks:
+  app_network:
+    external: true

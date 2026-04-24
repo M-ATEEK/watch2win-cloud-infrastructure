@@ -1,0 +1,116 @@
+version: "3.8"
+
+services:
+  prometheus:
+    image: prom/prometheus:v3.10.0
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
+      - "--web.enable-lifecycle"
+    volumes:
+      - prometheus_data:/prometheus
+    configs:
+      - source: prometheus_config
+        target: /etc/prometheus/prometheus.yml
+    secrets:
+      - prometheus_users
+    networks:
+      - app_network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=app_network"
+        - "traefik.http.routers.prometheus.rule=Host(`${PROMETHEUS_HOST}`)"
+        - "traefik.http.routers.prometheus.entrypoints=websecure"
+        - "traefik.http.routers.prometheus.tls.certresolver=myresolver"
+        - "traefik.http.routers.prometheus.middlewares=prometheus-auth"
+        - "traefik.http.middlewares.prometheus-auth.basicauth.usersfile=/run/secrets/prometheus_users"
+        - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+
+  loki:
+    image: grafana/loki:3.6.1
+    command:
+      - "-config.file=/etc/loki/local-config.yaml"
+    volumes:
+      - loki_data:/loki
+    configs:
+      - source: loki_config
+        target: /etc/loki/local-config.yaml
+    networks:
+      - app_network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  promtail:
+    image: grafana/promtail:3.6.1
+    command:
+      - "-config.file=/etc/promtail/config.yml"
+    configs:
+      - source: promtail_config
+        target: /etc/promtail/config.yml
+    volumes:
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - app_network
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+
+  grafana:
+    image: grafana/grafana-oss:12.4.1
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
+      GF_SERVER_ROOT_URL: https://${GRAFANA_HOST}
+    volumes:
+      - grafana_data:/var/lib/grafana
+    configs:
+      - source: grafana_datasources
+        target: /etc/grafana/provisioning/datasources/datasources.yml
+    secrets:
+      - grafana_admin_password
+    networks:
+      - app_network
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=app_network"
+        - "traefik.http.routers.grafana.rule=Host(`${GRAFANA_HOST}`)"
+        - "traefik.http.routers.grafana.entrypoints=websecure"
+        - "traefik.http.routers.grafana.tls.certresolver=myresolver"
+        - "traefik.http.services.grafana.loadbalancer.server.port=3000"
+
+configs:
+  prometheus_config:
+    file: ../monitoring/prometheus.yml
+  loki_config:
+    file: ../monitoring/loki-config.yaml
+  promtail_config:
+    file: ../monitoring/promtail-config.yaml
+  grafana_datasources:
+    file: ../monitoring/grafana/provisioning/datasources/datasources.yml
+
+secrets:
+  prometheus_users:
+    file: ../deploy/secrets/prometheus_users.txt
+  grafana_admin_password:
+    file: ../deploy/secrets/grafana_admin_password.txt
+
+networks:
+  app_network:
+    external: true
+
+volumes:
+  prometheus_data:
+  loki_data:
+  grafana_data:

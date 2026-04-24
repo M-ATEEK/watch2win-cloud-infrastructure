@@ -1,0 +1,134 @@
+version: "3.8"
+
+services:
+  mongo:
+    image: mongo:6.0
+    environment:
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE}
+    volumes:
+      - mongo_data:/data/db
+    networks:
+      - app_network
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  auth:
+    image: ghcr.io/${GHCR_OWNER}/watch2win-auth-service:${AUTH_IMAGE_TAG}
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      JWT_SECRET: ${JWT_SECRET}
+      MONGOOSE_URI_STRING: mongodb://mongo:27017/${MONGO_DATABASE}
+      BACKEND_API_URL: http://backend:8000/api/v1
+    networks:
+      - app_network
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=app_network"
+        - "traefik.http.routers.auth.rule=Host(`${AUTH_HOST}`)"
+        - "traefik.http.routers.auth.entrypoints=websecure"
+        - "traefik.http.routers.auth.tls.certresolver=myresolver"
+        - "traefik.http.services.auth.loadbalancer.server.port=3001"
+
+  backend:
+    image: ghcr.io/${GHCR_OWNER}/watch2win-backend:${BACKEND_IMAGE_TAG}
+    environment:
+      NODE_ENV: production
+      PORT: 8000
+      SITE_URL: 0.0.0.0
+      APP_URL: https://${USER_HOST}
+      API_URL: https://${BACKEND_HOST}
+      ALLOW_ORIGINS: https://${USER_HOST},https://${ADMIN_HOST},https://${TRAEFIK_HOST},https://${AUTH_HOST},https://${PROCESSOR_HOST}
+      MONGOOSE_URI_STRING: mongodb://mongo:27017/${MONGO_DATABASE}
+      JWT_SECRET: ${JWT_SECRET}
+    networks:
+      - app_network
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=app_network"
+        - "traefik.http.routers.backend.rule=Host(`${BACKEND_HOST}`)"
+        - "traefik.http.routers.backend.entrypoints=websecure"
+        - "traefik.http.routers.backend.tls.certresolver=myresolver"
+        - "traefik.http.services.backend.loadbalancer.server.port=8000"
+
+  processor:
+    image: ghcr.io/${GHCR_OWNER}/watch2win-processor-service:${PROCESSOR_IMAGE_TAG}
+    environment:
+      APP_NAME: Watch2Win Search Processor
+      MONGODB_URI: mongodb://mongo:27017
+      MONGO_DATABASE: ${MONGO_DATABASE}
+      JWT_SECRET: ${JWT_SECRET}
+      CORS_ORIGINS: '["https://${USER_HOST}","https://${ADMIN_HOST}","https://${BACKEND_HOST}","https://${TRAEFIK_HOST}"]'
+    networks:
+      - app_network
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=app_network"
+        - "traefik.http.routers.processor.rule=Host(`${PROCESSOR_HOST}`)"
+        - "traefik.http.routers.processor.entrypoints=websecure"
+        - "traefik.http.routers.processor.tls.certresolver=myresolver"
+        - "traefik.http.services.processor.loadbalancer.server.port=8000"
+
+  user-panel:
+    image: ghcr.io/${GHCR_OWNER}/watch2win-user-panel:${USER_PANEL_IMAGE_TAG}
+    networks:
+      - app_network
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=app_network"
+        - "traefik.http.routers.user-panel.rule=Host(`${USER_HOST}`)"
+        - "traefik.http.routers.user-panel.entrypoints=websecure"
+        - "traefik.http.routers.user-panel.tls.certresolver=myresolver"
+        - "traefik.http.services.user-panel.loadbalancer.server.port=80"
+
+  admin-panel:
+    image: ghcr.io/${GHCR_OWNER}/watch2win-admin-panel:${ADMIN_PANEL_IMAGE_TAG}
+    networks:
+      - app_network
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.docker.network=app_network"
+        - "traefik.http.routers.admin-panel.rule=Host(`${ADMIN_HOST}`)"
+        - "traefik.http.routers.admin-panel.entrypoints=websecure"
+        - "traefik.http.routers.admin-panel.tls.certresolver=myresolver"
+        - "traefik.http.services.admin-panel.loadbalancer.server.port=80"
+
+networks:
+  app_network:
+    external: true
+
+volumes:
+  mongo_data:
