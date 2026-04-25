@@ -108,7 +108,7 @@ jobs:
             secret_name="$1"
             secret_value="$2"
 
-            if ! printf '%s' "$secret_value" | grep -Eq '^[^:]+:(\\$[^:]+\\$.*|\\{SHA\\}.*)$'; then
+            if ! printf '%s' "$secret_value" | grep -Eq '^[^:]+:(\$[^:]+\$.*|\{SHA\}.*)$'; then
               echo "$secret_name must be an htpasswd-style entry like username:\$apr1\$... or username:{SHA}..."
               exit 1
             fi
