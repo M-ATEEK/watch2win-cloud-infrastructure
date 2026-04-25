@@ -64,11 +64,14 @@ services:
 
 secrets:
   do_token:
-    file: ../deploy/secrets/do_token.txt
+    external: true
+    name: ${TRAEFIK_DO_TOKEN_SECRET}
   traefik_users:
-    file: ../deploy/secrets/traefik_users.txt
+    external: true
+    name: ${TRAEFIK_USERS_SECRET}
   prometheus_users:
-    file: ../deploy/secrets/prometheus_users.txt
+    external: true
+    name: ${PROMETHEUS_USERS_SECRET}
 
 volumes:
   letsencrypt:

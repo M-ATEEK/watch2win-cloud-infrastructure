@@ -126,6 +126,18 @@ jobs:
           printf '%s' "${{ secrets.PROMETHEUS_USERS }}" > deploy/secrets/prometheus_users.txt
           printf '%s' "${{ secrets.GRAFANA_ADMIN_PASSWORD }}" > deploy/secrets/grafana_admin_password.txt
 
+          DO_TOKEN_HASH=$(sha256sum deploy/secrets/do_token.txt | awk '{print substr($1,1,12)}')
+          TRAEFIK_USERS_HASH=$(sha256sum deploy/secrets/traefik_users.txt | awk '{print substr($1,1,12)}')
+          PROMETHEUS_USERS_HASH=$(sha256sum deploy/secrets/prometheus_users.txt | awk '{print substr($1,1,12)}')
+          GRAFANA_PASSWORD_HASH=$(sha256sum deploy/secrets/grafana_admin_password.txt | awk '{print substr($1,1,12)}')
+
+          cat >> deploy/stack.env <<EOF
+          TRAEFIK_DO_TOKEN_SECRET=watch2win-traefik-do-token-$DO_TOKEN_HASH
+          TRAEFIK_USERS_SECRET=watch2win-traefik-users-$TRAEFIK_USERS_HASH
+          PROMETHEUS_USERS_SECRET=watch2win-prometheus-users-$PROMETHEUS_USERS_HASH
+          GRAFANA_ADMIN_PASSWORD_SECRET=watch2win-grafana-admin-password-$GRAFANA_PASSWORD_HASH
+          EOF
+
       - name: Copy deployment bundle to Swarm manager
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -156,13 +168,22 @@ jobs:
             . ./deploy/stack.env
             set +a
 
-            required_vars="BASE_DOMAIN ACME_EMAIL JWT_SECRET MONGO_DATABASE TRAEFIK_HOST PORTAINER_HOST AUTH_HOST BACKEND_HOST PROCESSOR_HOST USER_HOST ADMIN_HOST GRAFANA_HOST PROMETHEUS_HOST"
+            required_vars="BASE_DOMAIN ACME_EMAIL JWT_SECRET MONGO_DATABASE TRAEFIK_HOST PORTAINER_HOST AUTH_HOST BACKEND_HOST PROCESSOR_HOST USER_HOST ADMIN_HOST GRAFANA_HOST PROMETHEUS_HOST TRAEFIK_DO_TOKEN_SECRET TRAEFIK_USERS_SECRET PROMETHEUS_USERS_SECRET GRAFANA_ADMIN_PASSWORD_SECRET"
             for var_name in $required_vars; do
               if [ -z "${!var_name}" ]; then
                 echo "Missing required deployment variable: $var_name"
                 exit 1
               fi
             done
+
+            ensure_secret() {
+              secret_name="$1"
+              secret_file="$2"
+
+              if ! docker secret inspect "$secret_name" >/dev/null 2>&1; then
+                docker secret create "$secret_name" "$secret_file" >/dev/null
+              fi
+            }
 
             validate_stack() {
               stack_file="$1"
@@ -188,6 +209,11 @@ jobs:
             docker network inspect app_network >/dev/null 2>&1 || docker network create --driver overlay --attachable app_network
             docker volume inspect portainer_data >/dev/null 2>&1 || docker volume create portainer_data
             docker volume inspect letsencrypt >/dev/null 2>&1 || docker volume create letsencrypt
+
+            ensure_secret "$TRAEFIK_DO_TOKEN_SECRET" deploy/secrets/do_token.txt
+            ensure_secret "$TRAEFIK_USERS_SECRET" deploy/secrets/traefik_users.txt
+            ensure_secret "$PROMETHEUS_USERS_SECRET" deploy/secrets/prometheus_users.txt
+            ensure_secret "$GRAFANA_ADMIN_PASSWORD_SECRET" deploy/secrets/grafana_admin_password.txt
 
             if [ "$DEPLOY_PORTAINER" = "true" ]; then
               validate_stack stacks/portainer-stack.yml

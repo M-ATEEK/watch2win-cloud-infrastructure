@@ -111,9 +111,11 @@ configs:
 
 secrets:
   prometheus_users:
-    file: ../deploy/secrets/prometheus_users.txt
+    external: true
+    name: ${PROMETHEUS_USERS_SECRET}
   grafana_admin_password:
-    file: ../deploy/secrets/grafana_admin_password.txt
+    external: true
+    name: ${GRAFANA_ADMIN_PASSWORD_SECRET}
 
 networks:
   app_network:
