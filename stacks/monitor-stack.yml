@@ -3,6 +3,16 @@ version: "3.8"
 services:
   prometheus:
     image: prom/prometheus:v3.10.0
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:9090/-/healthy || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -13,6 +23,8 @@ services:
     configs:
       - source: prometheus_config
         target: /etc/prometheus/prometheus.yml
+      - source: prometheus_alert_rules
+        target: /etc/prometheus/alert.rules
     secrets:
       - prometheus_users
     networks:
@@ -34,15 +46,21 @@ services:
         - "traefik.http.middlewares.prometheus-auth.basicauth.usersfile=/run/secrets/prometheus_users"
         - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
 
-  loki:
-    image: grafana/loki:3.6.1
+  alertmanager:
+    image: prom/alertmanager:v0.28.1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     command:
-      - "-config.file=/etc/loki/local-config.yaml"
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      - "--storage.path=/alertmanager"
     volumes:
-      - loki_data:/loki
+      - alertmanager_data:/alertmanager
     configs:
-      - source: loki_config
-        target: /etc/loki/local-config.yaml
+      - source: alertmanager_config
+        target: /etc/alertmanager/alertmanager.yml
     networks:
       - app_network
     deploy:
@@ -53,25 +71,13 @@ services:
       restart_policy:
         condition: on-failure
 
-  promtail:
-    image: grafana/promtail:3.6.1
-    command:
-      - "-config.file=/etc/promtail/config.yml"
-    configs:
-      - source: promtail_config
-        target: /etc/promtail/config.yml
-    volumes:
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - app_network
-    deploy:
-      mode: global
-      restart_policy:
-        condition: on-failure
-
   grafana:
     image: grafana/grafana-oss:12.4.1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
     environment:
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_admin_password
       GF_SERVER_ROOT_URL: https://${GRAFANA_HOST}
@@ -99,23 +105,94 @@ services:
         - "traefik.http.routers.grafana.tls.certresolver=myresolver"
         - "traefik.http.services.grafana.loadbalancer.server.port=3000"
 
+  promtail:
+    image: grafana/promtail:3.6.1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    command:
+      - "-config.file=/etc/promtail/config.yml"
+    configs:
+      - source: promtail_config
+        target: /etc/promtail/config.yml
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/log:/var/log:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+    networks:
+      - app_network
+    deploy:
+      mode: global
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          memory: 128M
+        reservations:
+          memory: 64M
+
+  loki:
+    image: grafana/loki:3.6.1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
+    command:
+      - "-config.file=/etc/loki/local-config.yaml"
+    volumes:
+      - loki_data:/loki
+    configs:
+      - source: loki_config
+        target: /etc/loki/local-config.yaml
+    networks:
+      - app_network
+    deploy:
+      replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
+      restart_policy:
+        condition: on-failure
+      labels:
+        - "traefik.enable=true"
+        - "traefik.swarm.network=app_network"
+        - "traefik.http.routers.loki.rule=Host(`${LOKI_HOST}`)"
+        - "traefik.http.routers.loki.entrypoints=websecure"
+        - "traefik.http.routers.loki.tls.certresolver=myresolver"
+        - "traefik.http.routers.loki.middlewares=prometheus-auth"
+        - "traefik.http.middlewares.prometheus-auth.basicauth.usersfile=/run/secrets/prometheus_users"
+        - "traefik.http.services.loki.loadbalancer.server.port=3100"
+
 configs:
   prometheus_config:
-    file: ../monitoring/prometheus.yml
+    external: true
+    name: prometheus_config
+  prometheus_alert_rules:
+    external: true
+    name: prometheus_alert_rules
+  alertmanager_config:
+    external: true
+    name: alertmanager_config
   loki_config:
-    file: ../monitoring/loki-config.yaml
+    external: true
+    name: loki_config
   promtail_config:
-    file: ../monitoring/promtail-config.yaml
+    external: true
+    name: promtail_config
   grafana_datasources:
-    file: ../monitoring/grafana/provisioning/datasources/datasources.yml
+    external: true
+    name: grafana_datasources
 
 secrets:
   prometheus_users:
     external: true
-    name: ${PROMETHEUS_USERS_SECRET}
+    name: prometheus_users
   grafana_admin_password:
     external: true
-    name: ${GRAFANA_ADMIN_PASSWORD_SECRET}
+    name: grafana_admin_password
 
 networks:
   app_network:
@@ -123,5 +200,6 @@ networks:
 
 volumes:
   prometheus_data:
+  alertmanager_data:
   loki_data:
   grafana_data:

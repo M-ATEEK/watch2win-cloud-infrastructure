@@ -123,6 +123,7 @@ jobs:
           USER_HOST=user.$BASE_DOMAIN
           ADMIN_HOST=admin.$BASE_DOMAIN
           GRAFANA_HOST=grafana.$BASE_DOMAIN
+          LOKI_HOST=loki.$BASE_DOMAIN
           PROMETHEUS_HOST=prometheus.$BASE_DOMAIN
           DEPLOY_PORTAINER=$DEPLOY_PORTAINER
           DEPLOY_TRAEFIK=$DEPLOY_TRAEFIK
@@ -134,18 +135,6 @@ jobs:
           printf '%s' "$TRAEFIK_USERS_SECRET_VALUE" > deploy/secrets/traefik_users.txt
           printf '%s' "$PROMETHEUS_USERS_SECRET_VALUE" > deploy/secrets/prometheus_users.txt
           printf '%s' "$GRAFANA_ADMIN_PASSWORD_VALUE" > deploy/secrets/grafana_admin_password.txt
-
-          DO_TOKEN_HASH=$(sha256sum deploy/secrets/do_token.txt | awk '{print substr($1,1,12)}')
-          TRAEFIK_USERS_HASH=$(sha256sum deploy/secrets/traefik_users.txt | awk '{print substr($1,1,12)}')
-          PROMETHEUS_USERS_HASH=$(sha256sum deploy/secrets/prometheus_users.txt | awk '{print substr($1,1,12)}')
-          GRAFANA_PASSWORD_HASH=$(sha256sum deploy/secrets/grafana_admin_password.txt | awk '{print substr($1,1,12)}')
-
-          cat >> deploy/stack.env <<EOF
-          TRAEFIK_DO_TOKEN_SECRET=watch2win-traefik-do-token-$DO_TOKEN_HASH
-          TRAEFIK_USERS_SECRET=watch2win-traefik-users-$TRAEFIK_USERS_HASH
-          PROMETHEUS_USERS_SECRET=watch2win-prometheus-users-$PROMETHEUS_USERS_HASH
-          GRAFANA_ADMIN_PASSWORD_SECRET=watch2win-grafana-admin-password-$GRAFANA_PASSWORD_HASH
-          EOF
 
       - name: Copy deployment bundle to Swarm manager
         uses: appleboy/scp-action@v0.1.7
@@ -177,7 +166,7 @@ jobs:
             . ./deploy/stack.env
             set +a
 
-            required_vars="BASE_DOMAIN ACME_EMAIL JWT_SECRET MONGO_DATABASE TRAEFIK_HOST PORTAINER_HOST AUTH_HOST BACKEND_HOST PROCESSOR_HOST USER_HOST ADMIN_HOST GRAFANA_HOST PROMETHEUS_HOST TRAEFIK_DO_TOKEN_SECRET TRAEFIK_USERS_SECRET PROMETHEUS_USERS_SECRET GRAFANA_ADMIN_PASSWORD_SECRET"
+            required_vars="BASE_DOMAIN ACME_EMAIL JWT_SECRET MONGO_DATABASE TRAEFIK_HOST PORTAINER_HOST AUTH_HOST BACKEND_HOST PROCESSOR_HOST USER_HOST ADMIN_HOST GRAFANA_HOST LOKI_HOST PROMETHEUS_HOST"
             for var_name in $required_vars; do
               if [ -z "${!var_name}" ]; then
                 echo "Missing required deployment variable: $var_name"
@@ -191,6 +180,15 @@ jobs:
 
               if ! docker secret inspect "$secret_name" >/dev/null 2>&1; then
                 docker secret create "$secret_name" "$secret_file" >/dev/null
+              fi
+            }
+
+            ensure_config() {
+              config_name="$1"
+              config_file="$2"
+
+              if ! docker config inspect "$config_name" >/dev/null 2>&1; then
+                docker config create "$config_name" "$config_file" >/dev/null
               fi
             }
 
@@ -219,17 +217,15 @@ jobs:
             docker volume inspect portainer_data >/dev/null 2>&1 || docker volume create portainer_data
             docker volume inspect letsencrypt >/dev/null 2>&1 || docker volume create letsencrypt
 
-            ensure_secret "$TRAEFIK_DO_TOKEN_SECRET" deploy/secrets/do_token.txt
-            ensure_secret "$TRAEFIK_USERS_SECRET" deploy/secrets/traefik_users.txt
-            ensure_secret "$PROMETHEUS_USERS_SECRET" deploy/secrets/prometheus_users.txt
-            ensure_secret "$GRAFANA_ADMIN_PASSWORD_SECRET" deploy/secrets/grafana_admin_password.txt
-
             if [ "$DEPLOY_PORTAINER" = "true" ]; then
               validate_stack stacks/portainer-stack.yml
               docker stack deploy -c stacks/portainer-stack.yml portainer-stack --with-registry-auth
             fi
 
             if [ "$DEPLOY_TRAEFIK" = "true" ]; then
+              ensure_secret do_token deploy/secrets/do_token.txt
+              ensure_secret traefik_users deploy/secrets/traefik_users.txt
+              ensure_secret prometheus_users deploy/secrets/prometheus_users.txt
               validate_stack stacks/traefik-stack.yml
               docker stack deploy -c stacks/traefik-stack.yml traefik-stack --with-registry-auth
             fi
@@ -240,6 +236,14 @@ jobs:
             fi
 
             if [ "$DEPLOY_MONITORING" = "true" ]; then
+              ensure_secret prometheus_users deploy/secrets/prometheus_users.txt
+              ensure_secret grafana_admin_password deploy/secrets/grafana_admin_password.txt
+              ensure_config prometheus_config monitoring/prometheus.yml
+              ensure_config prometheus_alert_rules monitoring/alert.rules
+              ensure_config alertmanager_config monitoring/alertmanager.yml
+              ensure_config loki_config monitoring/loki-config.yaml
+              ensure_config promtail_config monitoring/promtail-config.yaml
+              ensure_config grafana_datasources monitoring/grafana/provisioning/datasources/datasources.yml
               validate_stack stacks/monitor-stack.yml
               docker stack deploy -c stacks/monitor-stack.yml monitor-stack --with-registry-auth
             fi

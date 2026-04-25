@@ -66,13 +66,13 @@ services:
 secrets:
   do_token:
     external: true
-    name: ${TRAEFIK_DO_TOKEN_SECRET}
+    name: do_token
   traefik_users:
     external: true
-    name: ${TRAEFIK_USERS_SECRET}
+    name: traefik_users
   prometheus_users:
     external: true
-    name: ${PROMETHEUS_USERS_SECRET}
+    name: prometheus_users
 
 volumes:
   letsencrypt:

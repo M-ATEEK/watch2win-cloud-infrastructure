@@ -212,6 +212,42 @@ For a manual deployment from the Portainer UI:
 4. Set one shared `JWT_SECRET` value and reuse it for auth, backend, and processor.
 5. Deploy `stacks/app-stack.yml` with stack name `watch2win`.
 
+For manual `traefik-stack` creation in Portainer, create these Docker secrets first:
+
+- `do_token`
+- `traefik_users`
+- `prometheus_users`
+
+For manual `monitor-stack` creation from the Portainer web editor, create these first:
+
+- Docker secret: `grafana_admin_password`
+- Docker configs: `prometheus_config`, `prometheus_alert_rules`, `alertmanager_config`, `loki_config`, `promtail_config`, `grafana_datasources`
+
+Portainer cannot resolve the repo-relative `monitoring/**` file paths, so create the monitoring configs on the manager first by running:
+
+```bash
+bash deploy/create_monitoring_swarm_configs.sh
+```
+
+Then deploy `stacks/monitor-stack.yml` in Portainer using only the normal host variables:
+
+- `PROMETHEUS_HOST`
+- `GRAFANA_HOST`
+- `LOKI_HOST`
+
+The stack already expects the fixed Session 8 style object names:
+
+- secret `prometheus_users`
+- secret `grafana_admin_password`
+- config `prometheus_config`
+- config `prometheus_alert_rules`
+- config `alertmanager_config`
+- config `loki_config`
+- config `promtail_config`
+- config `grafana_datasources`
+
+If you later change a Docker secret or config value, remove and recreate that Swarm secret/config manually before redeploying the related stack.
+
 `mongo`, `prometheus`, `loki`, and `grafana` are pinned to the manager node because they use local volumes and should not move between nodes in this Swarm setup.
 
 ## Portainer And Swarm Notes

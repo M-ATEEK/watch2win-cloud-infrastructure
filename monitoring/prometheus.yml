@@ -1,11 +1,48 @@
 global:
   scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: "watch2win"
+
+rule_files:
+  - /etc/prometheus/alert.rules
+
+alerting:
+  alertmanagers:
+    - scheme: http
+      static_configs:
+        - targets:
+            - "alertmanager:9093"
 
 scrape_configs:
-  - job_name: 'prometheus'
+  - job_name: "prometheus"
+    scrape_interval: 5s
     static_configs:
-      - targets: ['localhost:9090']
-      
-  - job_name: 'traefik'
+      - targets: ["localhost:9090"]
+
+  - job_name: "traefik"
+    scrape_interval: 5s
+    dns_sd_configs:
+      - names:
+          - "tasks.traefik"
+        type: "A"
+        port: 8080
+
+  - job_name: "alertmanager"
     static_configs:
-      - targets: ['traefik:8080'] 
+      - targets: ["alertmanager:9093"]
+
+  - job_name: "grafana"
+    static_configs:
+      - targets: ["grafana:3000"]
+
+  - job_name: "loki"
+    static_configs:
+      - targets: ["loki:3100"]
+
+  - job_name: "promtail"
+    dns_sd_configs:
+      - names:
+          - "tasks.promtail"
+        type: "A"
+        port: 9080
