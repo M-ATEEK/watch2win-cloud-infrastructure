@@ -5,6 +5,8 @@ const mongoose = require("mongoose");
 const axios = require("axios");
 const jwt = require("jwt-simple");
 const bcrypt = require("bcryptjs");
+const swaggerUi = require("swagger-ui-express");
+const swaggerSpec = require("./config/swagger");
 
 dotenv.config();
 
@@ -16,6 +18,24 @@ const BACKEND_API_URL = process.env.BACKEND_API_URL || "http://localhost:8000/ap
 
 app.use(cors());
 app.use(express.json());
+
+const buildSwaggerSpec = req => {
+  const forwardedProto = req.headers["x-forwarded-proto"];
+  const protocol = forwardedProto
+    ? forwardedProto.split(",")[0].trim()
+    : req.protocol;
+  const host = req.get("host");
+
+  return {
+    ...swaggerSpec,
+    servers: [
+      {
+        url: `${protocol}://${host}`,
+        description: "Current request host"
+      }
+    ]
+  };
+};
 
 mongoose.connect(MONGOOSE_URI_STRING, {
   useNewUrlParser: true,
@@ -115,6 +135,23 @@ async function authenticateRequest(req, res, next) {
 app.get("/", (req, res) => {
   res.send("Hello from auth!");
 });
+
+app.get("/api-docs.json", (req, res) => {
+  res.json(buildSwaggerSpec(req));
+});
+
+app.use(
+  "/api-docs",
+  swaggerUi.serve,
+  (req, res, next) => {
+    swaggerUi.setup(buildSwaggerSpec(req), {
+      explorer: true,
+      swaggerOptions: {
+        persistAuthorization: true
+      }
+    })(req, res, next);
+  }
+);
 
 app.post("/login", async (req, res) => {
   const { email, password } = req.body;
