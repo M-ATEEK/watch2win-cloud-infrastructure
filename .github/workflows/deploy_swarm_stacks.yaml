@@ -64,9 +64,18 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Prepare deployment bundle
+        env:
+          BASE_DOMAIN_SECRET: ${{ secrets.BASE_DOMAIN }}
+          ACME_EMAIL_SECRET: ${{ secrets.ACME_EMAIL }}
+          JWT_SECRET_VALUE: ${{ secrets.JWT_SECRET }}
+          MONGO_DATABASE_SECRET: ${{ secrets.MONGO_DATABASE }}
+          DO_TOKEN_SECRET: ${{ secrets.DO_TOKEN }}
+          TRAEFIK_USERS_SECRET_VALUE: ${{ secrets.TRAEFIK_USERS }}
+          PROMETHEUS_USERS_SECRET_VALUE: ${{ secrets.PROMETHEUS_USERS }}
+          GRAFANA_ADMIN_PASSWORD_VALUE: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
         run: |
           REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          BASE_DOMAIN="${{ secrets.BASE_DOMAIN }}"
+          BASE_DOMAIN="$BASE_DOMAIN_SECRET"
 
           if [ -z "$BASE_DOMAIN" ]; then
             echo "BASE_DOMAIN secret is required."
@@ -98,9 +107,9 @@ jobs:
           cat > deploy/stack.env <<EOF
           GHCR_OWNER=$REPO_OWNER
           BASE_DOMAIN=$BASE_DOMAIN
-          ACME_EMAIL=${{ secrets.ACME_EMAIL }}
-          JWT_SECRET=${{ secrets.JWT_SECRET }}
-          MONGO_DATABASE=${{ secrets.MONGO_DATABASE }}
+          ACME_EMAIL=$ACME_EMAIL_SECRET
+          JWT_SECRET=$JWT_SECRET_VALUE
+          MONGO_DATABASE=$MONGO_DATABASE_SECRET
           AUTH_IMAGE_TAG=$AUTH_IMAGE_TAG
           BACKEND_IMAGE_TAG=$BACKEND_IMAGE_TAG
           PROCESSOR_IMAGE_TAG=$PROCESSOR_IMAGE_TAG
@@ -121,10 +130,10 @@ jobs:
           DEPLOY_MONITORING=$DEPLOY_MONITORING
           EOF
 
-          printf '%s' "${{ secrets.DO_TOKEN }}" > deploy/secrets/do_token.txt
-          printf '%s' "${{ secrets.TRAEFIK_USERS }}" > deploy/secrets/traefik_users.txt
-          printf '%s' "${{ secrets.PROMETHEUS_USERS }}" > deploy/secrets/prometheus_users.txt
-          printf '%s' "${{ secrets.GRAFANA_ADMIN_PASSWORD }}" > deploy/secrets/grafana_admin_password.txt
+          printf '%s' "$DO_TOKEN_SECRET" > deploy/secrets/do_token.txt
+          printf '%s' "$TRAEFIK_USERS_SECRET_VALUE" > deploy/secrets/traefik_users.txt
+          printf '%s' "$PROMETHEUS_USERS_SECRET_VALUE" > deploy/secrets/prometheus_users.txt
+          printf '%s' "$GRAFANA_ADMIN_PASSWORD_VALUE" > deploy/secrets/grafana_admin_password.txt
 
           DO_TOKEN_HASH=$(sha256sum deploy/secrets/do_token.txt | awk '{print substr($1,1,12)}')
           TRAEFIK_USERS_HASH=$(sha256sum deploy/secrets/traefik_users.txt | awk '{print substr($1,1,12)}')
