@@ -1,5 +1,6 @@
 db_data/
-setup_instructions/
+setup-instructions/
+Readme.md
 watch2win-backend/
 watch2win-user-panel/
 watch2win-admin-panel/
