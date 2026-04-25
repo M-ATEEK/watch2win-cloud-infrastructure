@@ -73,7 +73,6 @@ Then, we need to give sudo permissions to this user
 usermod -aG sudo dockeruser
 mkdir /home/dockeruser/.ssh
 cp .ssh/authorized_keys /home/dockeruser/.ssh/authorized_keys
-# And give the proper permissions for the new files
 chown -R dockeruser:dockeruser /home/dockeruser/.ssh
 chmod 700 /home/dockeruser/.ssh
 chmod 600 /home/dockeruser/.ssh/authorized_keys
@@ -146,6 +145,18 @@ sudo ufw allow in on eth1 to any port 50
 sudo ufw allow in on eth1 to any port 9000
 sudo ufw allow in on eth1 to any port 9001
 sudo ufw allow in on eth1 to any port 9443
+
+
+sudo ufw allow 2376
+sudo ufw allow 2377
+sudo ufw allow 7946
+sudo ufw allow 4789
+sudo ufw allow 50
+sudo ufw allow 9000
+sudo ufw allow 9001
+sudo ufw allow 9443
+
+
 ```
 
 ### 1.5 Install loki-driver
@@ -174,6 +185,8 @@ Run the following command on the worker droplet:
 ```bash
 docker swarm join --token <JOIN_TOKEN>
 ```
+
+DONE --->
 
 After this, you do not need to access the worker droplets anymore. Everything will be done from the manager droplet.
 
@@ -318,6 +331,8 @@ Now, we are going to create a stack for traefik. Instead of having ALL our servi
 2. Name the stack `traefik-stack`
 3. Paste the following content into the yaml file. (Make sure to change the URL properly)
 4. After this, you should be able to log in from the address https://traefik.myservice.com
+
+
 
 ###### traefik-stack.yml
 

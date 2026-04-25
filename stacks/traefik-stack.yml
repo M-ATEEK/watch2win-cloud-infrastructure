@@ -2,14 +2,15 @@ version: "3.8"
 
 services:
   traefik:
-    image: public.ecr.aws/docker/library/traefik:v2.11.21
+    image: traefik:v3.6.10
     command:
       - "--api.insecure=false"
       - "--api.dashboard=true"
-      - "--providers.docker=true"
-      - "--providers.docker.swarmmode=true"
-      - "--providers.docker.watch=true"
-      - "--providers.docker.exposedbydefault=false"
+      - "--providers.swarm=true"
+      - "--providers.swarm.endpoint=unix:///var/run/docker.sock"
+      - "--providers.swarm.watch=true"
+      - "--providers.swarm.exposedbydefault=false"
+      - "--providers.swarm.network=app_network"
       - "--entrypoints.web.address=:80"
       - "--entrypoints.web.http.redirections.entryPoint.to=websecure"
       - "--entrypoints.web.http.redirections.entryPoint.scheme=https"
@@ -27,7 +28,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - letsencrypt:/letsencrypt
     environment:
-      - DO_TOKEN_FILE=/run/secrets/do_token
+      - DO_AUTH_TOKEN_FILE=/run/secrets/do_token
     secrets:
       - do_token
       - traefik_users
@@ -46,13 +47,20 @@ services:
         condition: on-failure
       labels:
         - "traefik.enable=true"
-        - "traefik.docker.network=app_network"
+        - "traefik.swarm.network=app_network"
         - "traefik.http.routers.traefik.rule=Host(`${TRAEFIK_HOST}`)"
         - "traefik.http.routers.traefik.entrypoints=websecure"
         - "traefik.http.routers.traefik.tls.certresolver=myresolver"
         - "traefik.http.routers.traefik.service=api@internal"
+        - "traefik.http.services.traefik.loadbalancer.server.port=9999"
         - "traefik.http.routers.traefik.middlewares=traefik-auth"
         - "traefik.http.middlewares.traefik-auth.basicauth.usersfile=/run/secrets/traefik_users"
+        - "traefik.http.routers.metrics.rule=Host(`${TRAEFIK_HOST}`) && Path(`/metrics`)"
+        - "traefik.http.routers.metrics.entrypoints=websecure"
+        - "traefik.http.routers.metrics.tls.certresolver=myresolver"
+        - "traefik.http.routers.metrics.service=prometheus@internal"
+        - "traefik.http.routers.metrics.middlewares=prometheus-auth"
+        - "traefik.http.middlewares.prometheus-auth.basicauth.usersfile=/run/secrets/prometheus_users"
 
 secrets:
   do_token:

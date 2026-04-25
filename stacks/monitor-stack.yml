@@ -19,11 +19,14 @@ services:
       - app_network
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
       restart_policy:
         condition: on-failure
       labels:
         - "traefik.enable=true"
-        - "traefik.docker.network=app_network"
+        - "traefik.swarm.network=app_network"
         - "traefik.http.routers.prometheus.rule=Host(`${PROMETHEUS_HOST}`)"
         - "traefik.http.routers.prometheus.entrypoints=websecure"
         - "traefik.http.routers.prometheus.tls.certresolver=myresolver"
@@ -44,6 +47,9 @@ services:
       - app_network
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
       restart_policy:
         condition: on-failure
 
@@ -80,11 +86,14 @@ services:
       - app_network
     deploy:
       replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
       restart_policy:
         condition: on-failure
       labels:
         - "traefik.enable=true"
-        - "traefik.docker.network=app_network"
+        - "traefik.swarm.network=app_network"
         - "traefik.http.routers.grafana.rule=Host(`${GRAFANA_HOST}`)"
         - "traefik.http.routers.grafana.entrypoints=websecure"
         - "traefik.http.routers.grafana.tls.certresolver=myresolver"

@@ -37,7 +37,7 @@ services:
         condition: on-failure
       labels:
         - "traefik.enable=true"
-        - "traefik.docker.network=app_network"
+        - "traefik.swarm.network=app_network"
         - "traefik.http.routers.portainer.rule=Host(`${PORTAINER_HOST}`)"
         - "traefik.http.routers.portainer.entrypoints=websecure"
         - "traefik.http.routers.portainer.tls.certresolver=myresolver"

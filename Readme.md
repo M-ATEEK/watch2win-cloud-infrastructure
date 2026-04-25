@@ -95,6 +95,10 @@ The deploy workflow copies `stacks/`, `monitoring/`, and `deploy/` to the Swarm 
 admin:$apr1$example$hashedValueHere
 ```
 
+For Traefik v3 with the DigitalOcean DNS challenge, the stack passes the token through `DO_AUTH_TOKEN_FILE=/run/secrets/do_token`.
+
+The production images are pulled from `ghcr.io/m-ateek/...`. If you deploy manually through the Portainer UI, configure a `ghcr.io` registry in Portainer first with your GitHub username and a PAT that can read packages, otherwise the stack cannot pull the private images.
+
 ## Build Triggers
 
 The workflows follow the instructions-folder pattern and can be triggered by commit message tags:
@@ -164,6 +168,8 @@ Production deployment is split into these files:
 - `stacks/app-stack.yml`
 - `stacks/monitor-stack.yml`
 
+The stack files expect hostnames such as `traefik.<domain>` and `portainer.<domain>` to be available in the environment. The GitHub deploy workflow generates these automatically from `BASE_DOMAIN`. If you deploy manually, populate `deploy/stack.env` first and export it before running `docker stack deploy`.
+
 ## Deployment Order
 
 Recommended order on a new Swarm cluster:
@@ -182,6 +188,31 @@ Recommended order on a new Swarm cluster:
    - `prometheus.<your-domain>`
 4. Run the root deploy workflow.
 5. Open Portainer and verify the deployed stacks.
+
+For a manual deployment on the manager, use:
+
+```bash
+set -a
+. ./deploy/stack.env
+set +a
+
+docker stack deploy -c stacks/portainer-stack.yml portainer-stack --with-registry-auth
+docker stack deploy -c stacks/traefik-stack.yml traefik-stack --with-registry-auth
+docker stack deploy -c stacks/app-stack.yml watch2win --with-registry-auth
+docker stack deploy -c stacks/monitor-stack.yml monitor-stack --with-registry-auth
+```
+
+If a hostname variable is missing, Traefik labels can render as `Host(\`\`)`, so the workflow now validates rendered stack configs before deploying.
+
+For a manual deployment from the Portainer UI:
+
+1. Add a registry for `ghcr.io` in Portainer with credentials that can read the package images.
+2. Use `deploy/.env.example` as the template for the stack environment variables.
+3. Set `GHCR_OWNER` to `m-ateek`.
+4. Set one shared `JWT_SECRET` value and reuse it for auth, backend, and processor.
+5. Deploy `stacks/app-stack.yml` with stack name `watch2win`.
+
+`mongo`, `prometheus`, `loki`, and `grafana` are pinned to the manager node because they use local volumes and should not move between nodes in this Swarm setup.
 
 ## Portainer And Swarm Notes
 

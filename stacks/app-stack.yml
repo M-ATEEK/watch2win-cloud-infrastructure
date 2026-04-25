@@ -17,6 +17,9 @@ services:
     deploy:
       mode: replicated
       replicas: 1
+      placement:
+        constraints:
+          - node.role == manager
       restart_policy:
         condition: on-failure
 
@@ -37,7 +40,7 @@ services:
         condition: on-failure
       labels:
         - "traefik.enable=true"
-        - "traefik.docker.network=app_network"
+        - "traefik.swarm.network=app_network"
         - "traefik.http.routers.auth.rule=Host(`${AUTH_HOST}`)"
         - "traefik.http.routers.auth.entrypoints=websecure"
         - "traefik.http.routers.auth.tls.certresolver=myresolver"
@@ -63,7 +66,7 @@ services:
         condition: on-failure
       labels:
         - "traefik.enable=true"
-        - "traefik.docker.network=app_network"
+        - "traefik.swarm.network=app_network"
         - "traefik.http.routers.backend.rule=Host(`${BACKEND_HOST}`)"
         - "traefik.http.routers.backend.entrypoints=websecure"
         - "traefik.http.routers.backend.tls.certresolver=myresolver"
@@ -86,7 +89,7 @@ services:
         condition: on-failure
       labels:
         - "traefik.enable=true"
-        - "traefik.docker.network=app_network"
+        - "traefik.swarm.network=app_network"
         - "traefik.http.routers.processor.rule=Host(`${PROCESSOR_HOST}`)"
         - "traefik.http.routers.processor.entrypoints=websecure"
         - "traefik.http.routers.processor.tls.certresolver=myresolver"
@@ -94,6 +97,8 @@ services:
 
   user-panel:
     image: ghcr.io/${GHCR_OWNER}/watch2win-user-panel:${USER_PANEL_IMAGE_TAG}
+    environment:
+      SERVER_UI_NAME: ${USER_HOST}
     networks:
       - app_network
     deploy:
@@ -103,14 +108,16 @@ services:
         condition: on-failure
       labels:
         - "traefik.enable=true"
-        - "traefik.docker.network=app_network"
+        - "traefik.swarm.network=app_network"
         - "traefik.http.routers.user-panel.rule=Host(`${USER_HOST}`)"
         - "traefik.http.routers.user-panel.entrypoints=websecure"
         - "traefik.http.routers.user-panel.tls.certresolver=myresolver"
-        - "traefik.http.services.user-panel.loadbalancer.server.port=80"
+        - "traefik.http.services.user-panel.loadbalancer.server.port=8904"
 
   admin-panel:
     image: ghcr.io/${GHCR_OWNER}/watch2win-admin-panel:${ADMIN_PANEL_IMAGE_TAG}
+    environment:
+      SERVER_UI_NAME: ${ADMIN_HOST}
     networks:
       - app_network
     deploy:
@@ -120,11 +127,11 @@ services:
         condition: on-failure
       labels:
         - "traefik.enable=true"
-        - "traefik.docker.network=app_network"
+        - "traefik.swarm.network=app_network"
         - "traefik.http.routers.admin-panel.rule=Host(`${ADMIN_HOST}`)"
         - "traefik.http.routers.admin-panel.entrypoints=websecure"
         - "traefik.http.routers.admin-panel.tls.certresolver=myresolver"
-        - "traefik.http.services.admin-panel.loadbalancer.server.port=80"
+        - "traefik.http.services.admin-panel.loadbalancer.server.port=8904"
 
 networks:
   app_network:

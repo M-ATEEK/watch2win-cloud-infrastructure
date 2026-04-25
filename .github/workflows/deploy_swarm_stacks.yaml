@@ -68,6 +68,11 @@ jobs:
           REPO_OWNER=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           BASE_DOMAIN="${{ secrets.BASE_DOMAIN }}"
 
+          if [ -z "$BASE_DOMAIN" ]; then
+            echo "BASE_DOMAIN secret is required."
+            exit 1
+          fi
+
           AUTH_IMAGE_TAG="${{ github.event.inputs.auth_image_tag }}"
           BACKEND_IMAGE_TAG="${{ github.event.inputs.backend_image_tag }}"
           PROCESSOR_IMAGE_TAG="${{ github.event.inputs.processor_image_tag }}"
@@ -151,6 +156,32 @@ jobs:
             . ./deploy/stack.env
             set +a
 
+            required_vars="BASE_DOMAIN ACME_EMAIL JWT_SECRET MONGO_DATABASE TRAEFIK_HOST PORTAINER_HOST AUTH_HOST BACKEND_HOST PROCESSOR_HOST USER_HOST ADMIN_HOST GRAFANA_HOST PROMETHEUS_HOST"
+            for var_name in $required_vars; do
+              if [ -z "${!var_name}" ]; then
+                echo "Missing required deployment variable: $var_name"
+                exit 1
+              fi
+            done
+
+            validate_stack() {
+              stack_file="$1"
+              rendered_file="/tmp/$(basename "$stack_file").rendered.yml"
+              docker stack config -c "$stack_file" > "$rendered_file"
+
+              if grep -q 'Host(``)' "$rendered_file"; then
+                echo "Validation failed for $stack_file: empty Host() rule detected."
+                cat "$rendered_file"
+                exit 1
+              fi
+
+              if grep -q '\${[A-Z0-9_]\+}' "$rendered_file"; then
+                echo "Validation failed for $stack_file: unresolved environment placeholder detected."
+                cat "$rendered_file"
+                exit 1
+              fi
+            }
+
             docker login ghcr.io -u "${{ github.actor }}" -p "${{ secrets.GHCR_PAT }}"
 
             docker network inspect agent_network >/dev/null 2>&1 || docker network create --driver overlay --attachable agent_network
@@ -159,17 +190,21 @@ jobs:
             docker volume inspect letsencrypt >/dev/null 2>&1 || docker volume create letsencrypt
 
             if [ "$DEPLOY_PORTAINER" = "true" ]; then
+              validate_stack stacks/portainer-stack.yml
               docker stack deploy -c stacks/portainer-stack.yml portainer-stack --with-registry-auth
             fi
 
             if [ "$DEPLOY_TRAEFIK" = "true" ]; then
+              validate_stack stacks/traefik-stack.yml
               docker stack deploy -c stacks/traefik-stack.yml traefik-stack --with-registry-auth
             fi
 
             if [ "$DEPLOY_APP" = "true" ]; then
+              validate_stack stacks/app-stack.yml
               docker stack deploy -c stacks/app-stack.yml watch2win --with-registry-auth
             fi
 
             if [ "$DEPLOY_MONITORING" = "true" ]; then
+              validate_stack stacks/monitor-stack.yml
               docker stack deploy -c stacks/monitor-stack.yml monitor-stack --with-registry-auth
             fi
